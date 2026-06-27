@@ -8,6 +8,16 @@ use crate::ynab_json_structures::YnabMoney;
 
 mod ynab_json_structures;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_get_last_day_of_month() {
+        assert_eq!(get_last_day_of_month(Month::April), Utc.ymd(Utc::now().year(), Month::April.number_from_month(), 30));
+        assert_eq!(get_last_day_of_month(Month::July), Utc.ymd(Utc::now().year(), Month::July.number_from_month(), 31));
+    }
+}
+
 struct ModifiedAccounts {
     account_id: String,
     name: String,
@@ -15,6 +25,7 @@ struct ModifiedAccounts {
     adjustment: ynab_json_structures::YnabMoney
 }
 
+const YNAB_BASE_URL: &str = "https://api.youneedabudget.com/v1/";
 const LAST_USED_BUDGET_GET_ACCOUNTS_BASE_URL: &str = "https://api.youneedabudget.com/v1/budgets/last-used/accounts?access_token=";
 const LAST_USED_BUDGET_POST_TRANSACTION_BASE_URL: &str = "https://api.youneedabudget.com/v1/budgets/last-used/transactions?access_token=";
 
@@ -48,7 +59,7 @@ fn get_last_day_of_month(input_month: Month) -> Date<Utc>{
     // if current month is December, then increment year (this probably isn't neccessary)
     if input_month == Month::December {
         successive_month = Utc.ymd(
-            Utc::now().date().year() + 1,
+            Utc::now().date().year(),
             input_month.succ().number_from_month(),
             1
         );
@@ -61,20 +72,26 @@ fn get_last_day_of_month(input_month: Month) -> Date<Utc>{
 
 fn main() {
     let mut api_token_dictionary:HashMap<String, String> = HashMap::new();
+    let mut budget_list_dictionary:HashMap<String, String> = HashMap::new();
+
     parse_api_token_file("src/api_tokens.env", &mut api_token_dictionary);
+    parse_api_token_file("src/budget_list.env", &mut budget_list_dictionary);
     
     let mut access_token = None;
-    while access_token == None {
+    let mut budget_id = None;
+    while access_token == None && budget_id == None {
         println!("\nSelect a user by typing their name:");
         for key in api_token_dictionary.keys() {
             println!("--{}", key);
         }
         let mut user_input = String::new();
         io::stdin().read_line(&mut user_input).expect("Failed to read user input");
+
         access_token = api_token_dictionary.get(&user_input.trim().to_uppercase());
+        budget_id = budget_list_dictionary.get(&user_input.trim().to_uppercase());
     }
 
-    let url = format!("{}{}", LAST_USED_BUDGET_GET_ACCOUNTS_BASE_URL, access_token.unwrap());
+    let url = format!("{}budgets/{}/accounts/?access_token={}", YNAB_BASE_URL, budget_id.unwrap(), access_token.unwrap());
     let blocking_client = Client::new();
     let accounts_resp = blocking_client.get(url.as_str()).send();
 
@@ -163,7 +180,7 @@ fn main() {
 
                     println!("Submitting adjustment for {} ...", modification.name);
                     
-                    let url = format!("{}{}", LAST_USED_BUDGET_POST_TRANSACTION_BASE_URL, access_token.unwrap());
+                    let url = format!("{}budgets/{}/transactions?access_token={}", YNAB_BASE_URL, budget_id.unwrap(), access_token.unwrap());
                     let result = blocking_client.post(url.as_str())
                                                 .json(&transaction_data)
                                                 .send();
